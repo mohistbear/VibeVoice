@@ -26,6 +26,7 @@ from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForCondition
 from vibevoice.modular.lora_loading import load_lora_assets
 from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
 from vibevoice.modular.streamer import AudioStreamer
+from gradio_i18n_cc import ui_strings
 from transformers.utils import logging
 from transformers import set_seed
 
@@ -697,36 +698,44 @@ class VibeVoiceDemo:
             return len(speakers)
     
 
-def create_demo_interface(demo_instance: VibeVoiceDemo):
+def create_demo_interface(demo_instance: VibeVoiceDemo, lang: str = "en"):
     """Create the Gradio interface with streaming support."""
-    
-    with gr.Blocks() as interface:
-        
+    t = ui_strings(lang)
+
+    with gr.Blocks(title=t["window_title"]) as interface:
+
         # Header
-        gr.HTML("""
-        # VibeVoice
-        """)
-        
+        gr.HTML(t["header_html"])
+
+        model_name = demo_instance.model_path.split("/")[-1]
+        gr.HTML(
+            f'<div style="text-align:center;margin:-0.5rem 0 0.75rem;font-size:0.88rem;'
+            f'color:#6b7280">'
+            f'{t["model_info_label"]}: '
+            f'<code style="background:#f3f4f6;padding:2px 8px;border-radius:4px;'
+            f'color:#374151">{demo_instance.model_path}</code> '
+            f'({model_name})</div>'
+        )
+
         with gr.Row():
             # Left column - Settings
             with gr.Column(scale=1, elem_classes="settings-card"):
-                gr.Markdown("### **Podcast Settings**")
-                
+                gr.Markdown(t["podcast_settings"])
+
                 # Number of speakers
                 num_speakers = gr.Slider(
                     minimum=1,
                     maximum=4,
                     value=2,
                     step=1,
-                    label="Number of Speakers",
+                    label=t["num_speakers"],
                     elem_classes="slider-container"
                 )
                 
                 # Speaker selection
-                gr.Markdown("### 🎭 **Speaker Selection**")
-                
+                gr.Markdown(t["speaker_selection"])
+
                 available_speaker_names = list(demo_instance.available_voices.keys())
-                # default_speakers = available_speaker_names[:4] if len(available_speaker_names) >= 4 else available_speaker_names
                 default_speakers = ['en-Alice_woman', 'en-Carter_man', 'en-Frank_man', 'en-Maya_woman']
 
                 speaker_selections = []
@@ -735,23 +744,71 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                     speaker = gr.Dropdown(
                         choices=available_speaker_names,
                         value=default_value,
-                        label=f"Speaker {i+1}",
-                        visible=(i < 2),  # Initially show only first 2 speakers
+                        label=t["speaker_n"].format(i + 1),
+                        visible=(i < 2),
                         elem_classes="speaker-item"
                     )
                     speaker_selections.append(speaker)
-                
+
+                # Upload custom voice reference
+                with gr.Accordion(t["custom_voice_title"], open=False):
+                    gr.Markdown(t["custom_voice_hint"])
+                    custom_voice_upload = gr.Audio(
+                        label=t["custom_voice_upload"],
+                        type="filepath",
+                        sources=["upload", "microphone"],
+                    )
+                    custom_voice_name = gr.Textbox(
+                        label=t["custom_voice_name"],
+                        placeholder=t["custom_voice_name_placeholder"],
+                        max_lines=1,
+                    )
+                    custom_voice_btn = gr.Button(
+                        t["custom_voice_add"], variant="secondary", size="sm",
+                    )
+
+                    def _add_custom_voice(audio_path, name):
+                        if not audio_path or not name or not name.strip():
+                            raise gr.Error(t["custom_voice_error_empty"])
+                        safe_name = re.sub(r"[^\w\-]", "_", name.strip())
+                        dst = os.path.join(
+                            os.path.dirname(__file__), "voices", f"{safe_name}.wav"
+                        )
+                        audio_data, sr = sf.read(audio_path)
+                        if sr != 24000:
+                            audio_data = librosa.resample(
+                                audio_data, orig_sr=sr, target_sr=24000,
+                            )
+                        sf.write(dst, audio_data, 24000)
+                        demo_instance.voice_presets[safe_name] = dst
+                        demo_instance.available_voices[safe_name] = dst
+                        new_choices = sorted(demo_instance.available_voices.keys())
+                        updates = [
+                            gr.update(choices=new_choices, value=safe_name)
+                        ] + [
+                            gr.update(choices=new_choices)
+                            for _ in range(3)
+                        ]
+                        return updates
+
+                    custom_voice_btn.click(
+                        fn=_add_custom_voice,
+                        inputs=[custom_voice_upload, custom_voice_name],
+                        outputs=speaker_selections,
+                        queue=False,
+                    )
+
                 # Advanced settings
-                gr.Markdown("### ⚙️ **Advanced Settings**")
-                
+                gr.Markdown(t["advanced_settings"])
+
                 # Sampling parameters (contains all generation settings)
-                with gr.Accordion("Generation Parameters", open=False):
+                with gr.Accordion(t["generation_parameters"], open=False):
                     cfg_scale = gr.Slider(
                         minimum=1.0,
                         maximum=12.0,
                         value=1.3,
                         step=0.05,
-                        label="CFG Scale (Guidance Strength)",
+                        label=t["cfg_scale"],
                         # info="Higher values increase adherence to text",
                         elem_classes="slider-container"
                     )
@@ -760,32 +817,27 @@ def create_demo_interface(demo_instance: VibeVoiceDemo):
                         maximum=50,
                         value=int(getattr(demo_instance, "inference_steps", 10)),
                         step=1,
-                        label="Inference Steps",
+                        label=t["inference_steps"],
                         elem_classes="slider-container",
                     )
                     seed = gr.Number(
                         value=42,
                         precision=0,
-                        label="Seed (-1 = random)",
+                        label=t["seed"],
                     )
                     disable_voice_cloning = gr.Checkbox(
                         value=False,
-                        label="Disable voice cloning (skip conditioning voice prompts)",
-                        info="When enabled, sets is_prefill=False so the model ignores provided speaker audio."
+                        label=t["disable_voice_cloning"],
+                        info=t["disable_voice_cloning_info"],
                     )
                 
             # Right column - Generation
             with gr.Column(scale=2, elem_classes="generation-card"):
-                gr.Markdown("### 📝 **Script Input**")
-                
+                gr.Markdown(t["script_input"])
+
                 script_input = gr.Textbox(
-                    label="Conversation Script",
-                    placeholder="""Enter your podcast script here. You can format it as:
-
-Speaker 1: Welcome to our podcast today!
-Speaker 2: Thanks for having me. I'm excited to discuss...
-
-Or paste text directly and it will auto-assign speakers.""",
+                    label=t["conversation_script"],
+                    placeholder=t["script_placeholder"],
                     lines=12,
                     max_lines=20,
                     elem_classes="script-input"
@@ -795,7 +847,7 @@ Or paste text directly and it will auto-assign speakers.""",
                 with gr.Row():
                     # Random example button (now on the left)
                     random_example_btn = gr.Button(
-                        "🎲 Random Example",
+                        t["random_example"],
                         size="lg",
                         variant="secondary",
                         elem_classes="random-btn",
@@ -804,7 +856,7 @@ Or paste text directly and it will auto-assign speakers.""",
                     
                     # Generate button (now on the right)
                     generate_btn = gr.Button(
-                        "🚀 Generate Podcast",
+                        t["generate"],
                         size="lg",
                         variant="primary",
                         elem_classes="generate-btn",
@@ -813,7 +865,7 @@ Or paste text directly and it will auto-assign speakers.""",
                 
                 # Stop button
                 stop_btn = gr.Button(
-                    "🛑 Stop Generation",
+                    t["stop"],
                     size="lg",
                     variant="stop",
                     elem_classes="stop-btn",
@@ -822,29 +874,17 @@ Or paste text directly and it will auto-assign speakers.""",
                 
                 # Streaming status indicator
                 streaming_status = gr.HTML(
-                    value="""
-                    <div style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); 
-                                border: 1px solid rgba(34, 197, 94, 0.3); 
-                                border-radius: 8px; 
-                                padding: 0.75rem; 
-                                margin: 0.5rem 0;
-                                text-align: center;
-                                font-size: 0.9rem;
-                                color: #166534;">
-                        <span class="streaming-indicator"></span>
-                        <strong>LIVE STREAMING</strong> - Audio is being generated in real-time
-                    </div>
-                    """,
+                    value=t["streaming_status_html"],
                     visible=False,
                     elem_id="streaming-status"
                 )
                 
                 # Output section
-                gr.Markdown("### 🎵 **Generated Podcast**")
-                
+                gr.Markdown(t["generated_podcast"])
+
                 # Streaming audio output (outside of tabs for simpler handling)
                 audio_output = gr.Audio(
-                    label="Streaming Audio (Real-time)",
+                    label=t["streaming_audio"],
                     type="numpy",
                     elem_classes="audio-output",
                     streaming=True,  # Enable streaming mode
@@ -855,7 +895,7 @@ Or paste text directly and it will auto-assign speakers.""",
                 
                 # Complete audio output (non-streaming)
                 complete_audio_output = gr.Audio(
-                    label="Complete Podcast (Download after generation)",
+                    label=t["complete_audio"],
                     type="filepath",
                     elem_classes="audio-output complete-audio-section",
                     streaming=False,  # Non-streaming mode
@@ -864,14 +904,11 @@ Or paste text directly and it will auto-assign speakers.""",
                     visible=False  # Initially hidden, shown when audio is ready
                 )
                 
-                gr.Markdown("""
-                *💡 **Streaming**: Audio plays as it's being generated (may have slight pauses)  
-                *💡 **Complete Audio**: Will appear below after generation finishes*
-                """)
-                
+                gr.Markdown(t["stream_hints"])
+
                 # Generation log
                 log_output = gr.Textbox(
-                    label="Generation Log",
+                    label=t["generation_log"],
                     lines=8,
                     max_lines=15,
                     interactive=False,
@@ -1014,18 +1051,10 @@ Or paste text directly and it will auto-assign speakers.""",
         )
         
         # Add usage tips
-        gr.Markdown("""
-        ### 💡 **Usage Tips**
-        
-        - Click **🚀 Generate Podcast** to start audio generation
-        - **Live Streaming** tab shows audio as it's generated (may have slight pauses)
-        - **Complete Audio** tab provides the full, uninterrupted podcast after generation
-        - During generation, you can click **🛑 Stop Generation** to interrupt the process
-        - The streaming indicator shows real-time generation progress
-        """)
-        
+        gr.Markdown(t["usage_tips"])
+
         # Add example scripts
-        gr.Markdown("### 📚 **Example Scripts**")
+        gr.Markdown(t["example_scripts"])
         
         # Use dynamically loaded examples if available, otherwise provide a default
         if hasattr(demo_instance, 'example_scripts') and demo_instance.example_scripts:
@@ -1039,18 +1068,13 @@ Or paste text directly and it will auto-assign speakers.""",
         gr.Examples(
             examples=example_scripts,
             inputs=[num_speakers, script_input],
-            label="Try these example scripts:"
+            label=t["examples_label"],
         )
 
         # --- Risks & limitations (footer) ---
         gr.Markdown(
-            """
-## Risks and limitations
-
-While efforts have been made to optimize it through various techniques, it may still produce outputs that are unexpected, biased, or inaccurate. VibeVoice inherits any biases, errors, or omissions produced by its base model (specifically, Qwen2.5 1.5b in this release).
-Potential for Deepfakes and Disinformation: High-quality synthetic speech can be misused to create convincing fake audio content for impersonation, fraud, or spreading disinformation. Users must ensure transcripts are reliable, check content accuracy, and avoid using generated content in misleading ways. Users are expected to use the generated content and to deploy the models in a lawful manner, in full compliance with all applicable laws and regulations in the relevant jurisdictions. It is best practice to disclose the use of AI when sharing AI-generated content.
-            """,
-            elem_classes="generation-card",  # 可选：复用卡片样式
+            t["risks"],
+            elem_classes="generation-card",
         )
     return interface
 
@@ -1109,7 +1133,18 @@ def parse_args():
         default=None,
         help="Path to a fine-tuned checkpoint directory containing LoRA adapters (optional)",
     )
-    
+    parser.add_argument(
+        "--zh",
+        action="store_true",
+        help="Use Simplified Chinese labels in the Gradio UI",
+    )
+    parser.add_argument(
+        "--server_name",
+        type=str,
+        default="0.0.0.0",
+        help="Host/interface to bind (default 0.0.0.0 for LAN + localhost)",
+    )
+
     return parser.parse_args()
 
 
@@ -1129,8 +1164,8 @@ def main():
         adapter_path=args.checkpoint_path,
     )
     
-    # Create interface
-    interface = create_demo_interface(demo_instance)
+    ui_lang = "zh" if args.zh else "en"
+    interface = create_demo_interface(demo_instance, lang=ui_lang)
     
     print(f"🚀 Launching demo on port {args.port}")
     print(f"📁 Model path: {args.model_path}")
@@ -1145,10 +1180,10 @@ def main():
             default_concurrency_limit=1  # Process one request at a time
         ).launch(
             share=args.share,
-            # server_port=args.port,
-            server_name="0.0.0.0" if args.share else "127.0.0.1",
+            server_port=args.port,
+            server_name=args.server_name,
             show_error=True,
-            show_api=False  # Hide API docs for cleaner interface
+            show_api=False,  # Hide API docs for cleaner interface
         )
     except KeyboardInterrupt:
         print("\n🛑 Shutting down gracefully...")
