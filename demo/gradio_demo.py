@@ -931,6 +931,10 @@ def create_demo_interface(demo_instance: VibeVoiceDemo, lang: str = "en"):
         def generate_podcast_wrapper(num_speakers, script, speaker_1, speaker_2, speaker_3, speaker_4, cfg_scale, inference_steps, seed, disable_voice_cloning):
             """Wrapper function to handle the streaming generation call."""
             try:
+                num_speakers = int(num_speakers) if num_speakers is not None else 2
+                cfg_scale = float(cfg_scale) if cfg_scale is not None else 1.3
+                inference_steps = int(inference_steps) if inference_steps is not None else 10
+                seed = int(seed) if seed is not None else 42
                 speakers = [speaker_1, speaker_2, speaker_3, speaker_4]
 
                 # Clear outputs and reset visibility at start
